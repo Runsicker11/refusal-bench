@@ -7,19 +7,10 @@ of traps into ordinary questions, and nothing else would fail.
 """
 
 import duckdb
-import pytest
 
 import random
 
 from warehouse.seed import SEED, build, fingerprint
-
-
-@pytest.fixture(scope="session")
-def con():
-    c = duckdb.connect(":memory:")
-    build(c, random.Random(SEED))
-    yield c
-    c.close()
 
 
 def test_deterministic(con):

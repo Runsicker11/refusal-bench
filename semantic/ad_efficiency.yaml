@@ -1,0 +1,66 @@
+topic: ad_efficiency
+description: >
+  Paid media performance at campaign-day grain, as reported by the ad
+  platforms themselves.
+grain: [spend_date, campaign]
+tables: [ad_spend]
+
+fields:
+  spend_date:
+    means: The day the spend was billed, in platform local time.
+  campaign:
+    means: Campaign name. Stable across the whole history.
+  platform:
+    means: Search or Social. There are only these two.
+  spend:
+    means: Gross media cost billed by the platform.
+  impressions:
+    means: Times an ad was served.
+  clicks:
+    means: Times an ad was clicked.
+  attributed_orders:
+    means: >
+      Orders the platform claims credit for under its own attribution window.
+    caveat: >
+      Platform-claimed, not deduplicated across platforms. Two platforms can
+      both claim the same order, so summing across campaigns overcounts.
+  attributed_revenue:
+    means: >
+      Revenue attached to attributed_orders by the platform.
+    caveat: >
+      This is the only revenue figure in this topic. It is not company revenue
+      and does not reconcile to the orders table.
+
+routes_here:
+  - cost per acquisition by campaign
+  - return on ad spend by campaign
+  - click-through rate
+  - cost per click
+  - spend by platform over time
+
+refuses:
+  - ask: blended return on ad spend across all company revenue
+    because: >
+      ad_spend carries platform-attributed revenue only. Total company revenue
+      lives in orders, which has no campaign or platform key, so the two cannot
+      be joined at this grain — any blended figure would be an invented
+      denominator.
+    instead: >
+      Return on ad spend by campaign using attributed revenue, or total order
+      revenue by month from the orders topic, reported side by side and
+      labelled as different measures.
+
+  - ask: total marketing spend including agency fees and tooling
+    because: >
+      ad_spend covers platform media cost only. Agency retainers, creative
+      production and software are not in this warehouse at all.
+    instead: Platform media spend by campaign or by month.
+
+  - ask: how many of these orders were incremental
+    because: >
+      Incrementality requires a holdout or geo experiment. Nothing in this
+      warehouse records one, and attributed_orders is a correlational claim by
+      the platform, not a causal one.
+    instead: >
+      Attributed orders by campaign, stated as platform-claimed, alongside
+      total orders from the orders topic for context.
