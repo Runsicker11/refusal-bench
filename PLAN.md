@@ -39,6 +39,29 @@ specific missing input, and the nearest answerable alternative. A refusal
 without an alternative is a stonewall, and a stonewall passes a naive check
 while being useless to whoever asked.
 
+## Two sources of context
+
+The semantic layer describes what fields *mean*. It cannot describe what
+*happened* — the promo, the broken feed, the price change, the stockout. Those
+are the actual causes of most anomalies, and an agent that only knows field
+definitions will confidently attribute a promo-driven spike to organic demand.
+
+So there are two stores, with a stated precedence rule:
+
+| Store | Owns | Example |
+|---|---|---|
+| **Semantic layer** | mechanics — which table, which grain, which join, what a field means | `attributed_revenue` is platform-claimed and does not reconcile to orders |
+| **Knowledge notes** | meaning and history — dated operational facts | "20% off sitewide, 2026-03-14 to 2026-03-17" |
+
+When they disagree about what something means, the notes win. Skills and the
+semantic layer own mechanics; notes own meaning and history. Without a stated
+precedence rule, two sources of context drift into two different answers and
+nobody can tell which is authoritative.
+
+Notes record what things mean and what happened, **never what a metric
+currently equals**. A number written into a note is stale within a week and
+quietly poisons everything built on it. Live numbers resolve at query time.
+
 ## Decisions
 
 | Decision | Choice | Why |
@@ -87,8 +110,9 @@ debugging an uninstrumented agent is guesswork.
 
 ### Phase 3 — The investigator
 Hypothesis generation, evidence gathering and narrowing, explanation with
-cited evidence, refusal wired into conclusions, reusable domain skills.
-`#30` · `#31` · `#32` · `#33` · `#34`
+cited evidence, refusal wired into conclusions, reusable domain skills, and the
+knowledge notes the semantic layer cannot hold.
+`#30` · `#31` · `#32` · `#33` · `#34` · `#38` · `#39`
 
 ### Phase 4 — Evals and the ratchet
 Golden cases, five trap categories, trajectory grading, LLM-as-judge with a
