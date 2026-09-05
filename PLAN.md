@@ -100,7 +100,8 @@ Warehouse, semantic layer format, validator.
 ### Phase 1 — Agent skeleton
 The thinnest LangGraph loop that terminates. State schema, one tool, one
 human-in-the-loop interrupt. No hypothesis logic, no refusal, no evals.
-`#12` · `#24` · `#25`
+Diagram: [docs/graph.md](docs/graph.md), generated from the compiled graph.
+`#12` ✅ · `#24` · `#25`
 
 ### Phase 2 — Instrumentation
 OTel GenAI spans, token and cost accounting, budgets that halt a runaway loop,
