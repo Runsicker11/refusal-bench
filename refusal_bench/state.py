@@ -42,6 +42,10 @@ class InvestigationState(TypedDict, total=False):
     finding: str | None
     stop_reason: str | None
 
+    # What the reviewer said, kept whether they accepted, rejected or
+    # redirected. The decision is part of the record, not just its effect.
+    review_note: str
+
     # Internal: the tool call `think` handed to `act`. Underscore-prefixed
     # because it is plumbing between two nodes, not part of the investigation.
     _pending: object

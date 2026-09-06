@@ -1,26 +1,33 @@
 """The investigation loop.
 
-Three nodes and one conditional edge:
-
-    think ──▶ act ──▶ think ──▶ ... ──▶ conclude ──▶ END
-      │                                    ▲
-      └────────── decide ──────────────────┘
+    think ──▶ act ──▶ think ──▶ ... ──▶ review ──▶ conclude ──▶ END
+      │                            ▲        │
+      └────────── decide ──────────┴────────┘
 
 `think` asks the model what to do next. `act` runs the tool it asked for.
-`decide` is the conditional edge: keep going, or stop. `conclude` writes the
-finding.
+`decide` is the conditional edge: keep going, or stop. `review` pauses for a
+human. `conclude` writes the finding.
 
-Deliberately thin. There is no hypothesis generation (#30), no evidence
-narrowing (#31), no refusal (#33) and no real tool (#24). The only thing this
-has to do is terminate, and be shaped so those can be added without rewriting
-the loop.
+**Review is opt-in.** With `review=False` the graph runs straight through, which
+is what the eval suite needs -- pausing for a human on each of a hundred cases
+is not a review process, it is a hostage situation. With `review=True` the run
+freezes before the finding is published and waits.
+
+The invariant is the one from the orchestration harness this borrows from:
+**workers propose, humans dispose.** The agent never publishes a conclusion
+that a person has not seen.
+
+Deliberately thin otherwise. No hypothesis generation (#30), no evidence
+narrowing (#31), no refusal (#33).
 """
 
 from __future__ import annotations
 
 from typing import Callable
 
+from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
+from langgraph.types import interrupt
 
 from refusal_bench.model import Model
 from refusal_bench.state import InvestigationState
@@ -40,8 +47,12 @@ def _prompt(state: InvestigationState) -> str:
     return "\n".join(lines)
 
 
-def build_graph(model: Model, tools: dict[str, Tool]):
-    """Compile the investigation graph for a given model and tool set."""
+def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
+    """Compile the investigation graph.
+
+    `review=True` inserts a human checkpoint before the finding is published,
+    and compiles with a checkpointer so the run can be paused and resumed.
+    """
 
     def think(state: InvestigationState) -> dict:
         response = model.complete(_prompt(state))
@@ -71,6 +82,44 @@ def build_graph(model: Model, tools: dict[str, Tool]):
             "_pending": None,
         }
 
+    def review_node(state: InvestigationState) -> dict:
+        """Pause. A person decides what happens to this finding.
+
+        Resumed with {"action": "accept" | "reject" | "redirect", "note": str}.
+        """
+        decision = interrupt(
+            {
+                "anomaly": state.get("anomaly"),
+                "finding": state.get("finding"),
+                "evidence": state.get("evidence", []),
+                "steps": state.get("step"),
+            }
+        )
+        action = (decision or {}).get("action", "accept")
+        note = (decision or {}).get("note", "")
+
+        if action == "reject":
+            return {"finding": None, "stop_reason": "rejected", "review_note": note}
+
+        if action == "redirect":
+            # The note becomes evidence, so the next `think` sees it the same
+            # way it sees a query result. Human input is not a separate channel.
+            return {
+                "finding": None,
+                "stop_reason": None,
+                "review_note": note,
+                "evidence": [
+                    {
+                        "step": state.get("step", 0),
+                        "tool": "human",
+                        "args": {},
+                        "result": note,
+                    }
+                ],
+            }
+
+        return {"stop_reason": "accepted", "review_note": note}
+
     def conclude(state: InvestigationState) -> dict:
         if state.get("stop_reason"):
             return {}
@@ -87,20 +136,34 @@ def build_graph(model: Model, tools: dict[str, Tool]):
             return "conclude"
         return "act"
 
+    def after_review(state: InvestigationState) -> str:
+        """A redirected finding goes back into the loop; anything else ends."""
+        return "think" if state.get("stop_reason") is None else "conclude"
+
     graph = StateGraph(InvestigationState)
     graph.add_node("think", think)
     graph.add_node("act", act)
     graph.add_node("conclude", conclude)
 
     graph.set_entry_point("think")
-    graph.add_conditional_edges("think", decide, {"act": "act", "conclude": "conclude"})
     graph.add_edge("act", "think")
     graph.add_edge("conclude", END)
 
+    if review:
+        graph.add_node("review", review_node)
+        graph.add_conditional_edges("think", decide, {"act": "act", "conclude": "review"})
+        graph.add_conditional_edges("review", after_review, {"think": "think", "conclude": "conclude"})
+        return graph.compile(checkpointer=InMemorySaver())
+
+    graph.add_conditional_edges("think", decide, {"act": "act", "conclude": "conclude"})
     return graph.compile()
 
 
+START_STATE = {"evidence": [], "step": 0}
+
+
 def investigate(model: Model, tools: dict[str, Tool], anomaly: str, max_steps: int = 8):
+    """Run to completion with no human in the loop."""
     return build_graph(model, tools).invoke(
-        {"anomaly": anomaly, "evidence": [], "step": 0, "max_steps": max_steps}
+        {**START_STATE, "anomaly": anomaly, "max_steps": max_steps}
     )
