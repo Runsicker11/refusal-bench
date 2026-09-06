@@ -40,6 +40,13 @@ class ModelResponse:
     text: str = ""
     tool_call: ToolCall | None = None
     usage: Usage = field(default_factory=Usage)
+    # Which model actually served this. Comes from the API response rather than
+    # the request, because a provider can route you somewhere else.
+    model: str = "scripted"
+
+    @property
+    def finish_reason(self) -> str:
+        return "tool_calls" if self.tool_call is not None else "stop"
 
 
 class Model(Protocol):

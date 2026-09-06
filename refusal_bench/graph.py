@@ -29,6 +29,8 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import interrupt
 
+from refusal_bench import telemetry as tel
+from refusal_bench.cost import Budget, price_of
 from refusal_bench.model import Model
 from refusal_bench.state import InvestigationState
 
@@ -55,21 +57,52 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
     """
 
     def think(state: InvestigationState) -> dict:
-        response = model.complete(_prompt(state))
         step = state.get("step", 0) + 1
+        with tel.tracer.start_as_current_span("chat") as span:
+            span.set_attribute(tel.OPERATION_NAME, "chat")
+            span.set_attribute(tel.STEP, step)
+            response = model.complete(_prompt(state))
+
+            cost = price_of(
+                response.model,
+                response.usage.input_tokens,
+                response.usage.output_tokens,
+            )
+            span.set_attribute(tel.REQUEST_MODEL, response.model)
+            span.set_attribute(tel.USAGE_INPUT_TOKENS, response.usage.input_tokens)
+            span.set_attribute(tel.USAGE_OUTPUT_TOKENS, response.usage.output_tokens)
+            span.set_attribute(tel.RESPONSE_FINISH_REASONS, [response.finish_reason])
+            span.set_attribute(tel.COST_USD, cost)
+
+        totals = {
+            "step": step,
+            "input_tokens": state.get("input_tokens", 0) + response.usage.input_tokens,
+            "output_tokens": state.get("output_tokens", 0) + response.usage.output_tokens,
+            "cost_usd": state.get("cost_usd", 0.0) + cost,
+        }
         if response.tool_call is None:
-            return {"step": step, "finding": response.text, "stop_reason": "concluded"}
-        return {"step": step, "_pending": response.tool_call}
+            return {**totals, "finding": response.text, "stop_reason": "concluded"}
+        return {**totals, "_pending": response.tool_call}
 
     def act(state: InvestigationState) -> dict:
         call = state["_pending"]
-        tool = tools.get(call.name)
-        if tool is None:
-            # An unknown tool is information the model can recover from, not a
-            # crash. Same principle as a malformed query in #24.
-            result = f"error: no tool named {call.name!r}. available: {sorted(tools)}"
-        else:
-            result = tool(**call.args)
+        with tel.tracer.start_as_current_span("execute_tool") as span:
+            span.set_attribute(tel.OPERATION_NAME, "execute_tool")
+            span.set_attribute(tel.TOOL_NAME, call.name)
+            span.set_attribute(tel.STEP, state.get("step", 0))
+            # ponytail: full arguments on the span. Fine for synthetic data;
+            # in a real system this is where a query containing customer
+            # identifiers leaks into an observability backend.
+            span.set_attribute(tel.TOOL_ARGS, str(dict(call.args))[:1000])
+
+            tool = tools.get(call.name)
+            if tool is None:
+                # An unknown tool is information the model can recover from,
+                # not a crash. Same principle as a malformed query in #24.
+                result = f"error: no tool named {call.name!r}. available: {sorted(tools)}"
+            else:
+                result = tool(**call.args)
+            span.set_attribute(tel.TOOL_RESULT_CHARS, len(result))
         return {
             "evidence": [
                 {
@@ -123,8 +156,14 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
     def conclude(state: InvestigationState) -> dict:
         if state.get("stop_reason"):
             return {}
+        budget = Budget(
+            max_steps=state.get("max_steps", 8), max_usd=state.get("max_usd")
+        )
         return {
             "stop_reason": "budget",
+            "stop_detail": budget.breach(
+                state.get("step", 0), state.get("cost_usd", 0.0)
+            ),
             "finding": None,
         }
 
@@ -132,7 +171,10 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
         """Keep going, or stop. The only edge that can end the run."""
         if state.get("stop_reason"):
             return "conclude"
-        if state.get("step", 0) >= state.get("max_steps", 8):
+        budget = Budget(
+            max_steps=state.get("max_steps", 8), max_usd=state.get("max_usd")
+        )
+        if budget.breach(state.get("step", 0), state.get("cost_usd", 0.0)):
             return "conclude"
         return "act"
 
@@ -159,11 +201,35 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
     return graph.compile()
 
 
-START_STATE = {"evidence": [], "step": 0}
+START_STATE = {
+    "evidence": [],
+    "step": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": 0.0,
+}
 
 
-def investigate(model: Model, tools: dict[str, Tool], anomaly: str, max_steps: int = 8):
+def investigate(
+    model: Model,
+    tools: dict[str, Tool],
+    anomaly: str,
+    max_steps: int = 8,
+    max_usd: float | None = None,
+):
     """Run to completion with no human in the loop."""
-    return build_graph(model, tools).invoke(
-        {**START_STATE, "anomaly": anomaly, "max_steps": max_steps}
-    )
+    with tel.tracer.start_as_current_span("invoke_agent") as span:
+        span.set_attribute(tel.OPERATION_NAME, "invoke_agent")
+        out = build_graph(model, tools).invoke(
+            {
+                **START_STATE,
+                "anomaly": anomaly,
+                "max_steps": max_steps,
+                "max_usd": max_usd,
+            }
+        )
+        span.set_attribute(tel.USAGE_INPUT_TOKENS, out.get("input_tokens", 0))
+        span.set_attribute(tel.USAGE_OUTPUT_TOKENS, out.get("output_tokens", 0))
+        span.set_attribute(tel.COST_USD, out.get("cost_usd", 0.0))
+        span.set_attribute(tel.STOP_REASON, out.get("stop_reason") or "unknown")
+        return out

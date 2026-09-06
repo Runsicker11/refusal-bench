@@ -32,15 +32,26 @@ class InvestigationState(TypedDict, total=False):
     evidence: Annotated[list[Evidence], operator.add]
     step: int
 
-    # Limits. A step ceiling here is a placeholder for the real budgets in
-    # Phase 2; without something, a non-converging loop runs forever.
+    # Budgets. Checked live, in-process -- telemetry export is batched and
+    # asynchronous, so by the time a backend knows the run spent $4 it has
+    # spent $6.
     max_steps: int
+    max_usd: float | None
+
+    # Running totals. The same token counts go onto spans; these are the copy
+    # the budget check reads.
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float
 
     # Output. `stop_reason` is deliberately separate from `finding` -- an
     # investigation that halted on budget is a different outcome from one that
     # concluded, and Phase 4 grades them differently.
     finding: str | None
     stop_reason: str | None
+    # Which ceiling was hit, and at what value. A breach is usually a bug in
+    # the agent, not a limit set too low, so say what happened.
+    stop_detail: str | None
 
     # What the reviewer said, kept whether they accepted, rejected or
     # redirected. The decision is part of the record, not just its effect.

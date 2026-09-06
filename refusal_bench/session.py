@@ -18,6 +18,7 @@ from typing import Any
 
 from langgraph.types import Command
 
+from refusal_bench import telemetry as tel
 from refusal_bench.graph import START_STATE, Tool, build_graph
 from refusal_bench.model import Model
 
@@ -25,10 +26,17 @@ _threads = count(1)
 
 
 class ReviewSession:
-    def __init__(self, model: Model, tools: dict[str, Tool], max_steps: int = 8):
+    def __init__(
+        self,
+        model: Model,
+        tools: dict[str, Tool],
+        max_steps: int = 8,
+        max_usd: float | None = None,
+    ):
         self._graph = build_graph(model, tools, review=True)
         self._config = {"configurable": {"thread_id": f"run-{next(_threads)}"}}
         self._max_steps = max_steps
+        self._max_usd = max_usd
 
     @property
     def state(self) -> dict[str, Any]:
@@ -36,10 +44,17 @@ class ReviewSession:
 
     def start(self, anomaly: str) -> dict[str, Any] | None:
         """Run until a human is needed. Returns what they are being asked about."""
-        out = self._graph.invoke(
-            {**START_STATE, "anomaly": anomaly, "max_steps": self._max_steps},
-            self._config,
-        )
+        with tel.tracer.start_as_current_span("invoke_agent") as span:
+            span.set_attribute(tel.OPERATION_NAME, "invoke_agent")
+            out = self._graph.invoke(
+                {
+                    **START_STATE,
+                    "anomaly": anomaly,
+                    "max_steps": self._max_steps,
+                    "max_usd": self._max_usd,
+                },
+                self._config,
+            )
         return self._pending(out)
 
     def respond(self, action: str, note: str = "") -> dict[str, Any] | None:
@@ -48,9 +63,13 @@ class ReviewSession:
         Returns the next pause if the agent went back to work after a redirect,
         or None when the run is finished.
         """
-        out = self._graph.invoke(
-            Command(resume={"action": action, "note": note}), self._config
-        )
+        # A resumed run is its own unit of work, so it gets its own root span.
+        # A single trace cannot span a pause that may last days.
+        with tel.tracer.start_as_current_span("invoke_agent") as span:
+            span.set_attribute(tel.OPERATION_NAME, "invoke_agent")
+            out = self._graph.invoke(
+                Command(resume={"action": action, "note": note}), self._config
+            )
         return self._pending(out)
 
     @staticmethod

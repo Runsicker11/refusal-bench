@@ -103,11 +103,12 @@ human-in-the-loop interrupt. No hypothesis logic, no refusal, no evals.
 Diagram: [docs/graph.md](docs/graph.md), generated from the compiled graph.
 `#12` ✅ · `#24` · `#25`
 
-### Phase 2 — Instrumentation
+### Phase 2 — Instrumentation ✅
 OTel GenAI spans, token and cost accounting, budgets that halt a runaway loop,
 traces exported to a backend. Done before the agent gets complicated, because
 debugging an uninstrumented agent is guesswork.
-`#26` · `#27` · `#28` · `#29`
+See [docs/observability.md](docs/observability.md).
+`#26` ✅ · `#27` ✅ · `#28` ✅ · `#29` ✅
 
 ### Phase 3 — The investigator
 Hypothesis generation, evidence gathering and narrowing, explanation with
