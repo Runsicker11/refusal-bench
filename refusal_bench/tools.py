@@ -14,6 +14,15 @@ passes the guard and reads the file. Scoped to a synthetic warehouse this is
 acceptable; pointed at anything real, the tool needs a filesystem policy on top
 of these guards, not instead of them.
 
+**Statement splitting uses DuckDB's parser, not a regex.** An earlier version
+stripped comments and blanked string literals with two regexes, and
+`select '/*' ; drop table products /*' */` walked straight through it: the
+comment pattern does not know about quotes, so it swallowed the semicolon and
+the DROP. DuckDB read the same string correctly as two statements. Two
+hand-rolled regexes cannot soundly tokenise SQL against each other -- string
+and comment lexing is one stateful pass -- so the only guard that agrees with
+the engine is the engine.
+
 **A bad query is information, not a crash.** Syntax errors, missing tables and
 type mismatches all come back as text the model can read and act on. An
 exception ends the run; an error string lets the agent try again with a better
@@ -37,29 +46,40 @@ MAX_CHARS = 4000
 # write verb fail this check by construction.
 _ALLOWED_START = ("select", "with")
 
+# Only used to find the leading keyword, after the parser has already
+# guaranteed there is exactly one statement. It cannot be used to smuggle a
+# second one past that check.
 _COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
-# Single-quoted literals, doubled '' escapes included. Blanked before the
-# statement is inspected so punctuation inside a string cannot be mistaken for
-# syntax -- a filter on text containing a semicolon is a valid query.
-_STRING = re.compile(r"'(?:[^']|'')*'")
 
 
-def _reject(sql: str) -> str | None:
+def _reject(con: duckdb.DuckDBPyConnection, sql: str) -> str | None:
     """Return a refusal reason, or None if the statement may run.
 
-    Inspects a copy with comments removed and string literals blanked, so the
-    checks below see structure rather than content.
+    Splitting is delegated to DuckDB's parser so the guard and the engine
+    cannot disagree about where one statement ends. The keyword check is then
+    safe on the raw text, because the parser has already established there is
+    exactly one statement to read the keyword of.
     """
-    stripped = _STRING.sub("''", _COMMENT.sub(" ", sql)).strip()
-    if not stripped:
+    if not sql.strip():
         return "empty query"
 
-    # A trailing semicolon is fine; a second statement is not.
-    body, _, tail = stripped.partition(";")
-    if tail.strip():
-        return "only one statement per call"
+    try:
+        statements = con.extract_statements(sql)
+    except duckdb.Error:
+        # Unparseable SQL is a mistake the model can fix, not a policy
+        # refusal. Fall through and let execution report it, which also
+        # attaches the table list. Nothing DuckDB cannot parse can run.
+        return None
 
-    first = body.lstrip("( \t\n").split(None, 1)[0].lower() if body.split() else ""
+    if len(statements) != 1:
+        return f"only one statement per call, got {len(statements)}"
+
+    # PRAGMA parses as StatementType.SELECT, so the type alone is not enough.
+    if statements[0].type != duckdb.StatementType.SELECT:
+        return f"only SELECT and WITH are allowed, got {statements[0].type.name}"
+
+    body = _COMMENT.sub(" ", sql).strip().lstrip("( \t\n")
+    first = body.split(None, 1)[0].lower() if body.split() else ""
     if first not in _ALLOWED_START:
         return f"only SELECT and WITH are allowed, got {first.upper() or 'nothing'!r}"
     return None
@@ -92,7 +112,7 @@ def make_run_sql(
         return ", ".join(r[0] for r in rows)
 
     def run_sql(query: str) -> str:
-        reason = _reject(query)
+        reason = _reject(con, query)
         if reason is not None:
             return f"rejected: {reason}"
 

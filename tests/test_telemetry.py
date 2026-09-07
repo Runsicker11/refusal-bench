@@ -170,3 +170,15 @@ def test_budgets_are_checked_in_process_not_from_telemetry():
     model = ScriptedModel([_priced(tool_call=ToolCall("echo", {}))] * 20)
     out = investigate(model, TOOLS, "x", max_steps=50, max_usd=0.005)
     assert out["stop_reason"] == "budget"
+
+
+def test_configure_is_idempotent():
+    """A second processor exports every span twice: double bill, double count."""
+    from opentelemetry import trace
+
+    tel.configure("console")
+    provider = trace.get_tracer_provider()
+    before = len(provider._active_span_processor._span_processors)
+    tel.configure("console")
+    after = len(provider._active_span_processor._span_processors)
+    assert before == after

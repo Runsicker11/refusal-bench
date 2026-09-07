@@ -127,3 +127,39 @@ def test_connect_readonly_actually_blocks_writes(tmp_path):
     with pytest.raises(duckdb.Error):
         con.execute("insert into t values (1)")
     con.close()
+
+
+def test_a_comment_opener_inside_a_string_cannot_smuggle_a_write(run_sql, con):
+    """The bypass that made the regex guard unsound.
+
+    Two hand-rolled regexes cannot tokenise SQL against each other: the comment
+    pattern did not know about quotes, so it swallowed the semicolon and the
+    DROP. DuckDB read the same string correctly as two statements.
+    """
+    assert run_sql("select '/*' ; drop table products /*' */").startswith("rejected:")
+    assert con.execute("select count(*) from products").fetchone()[0] == 14
+
+
+def test_a_comment_marker_inside_a_string_does_not_hide_a_statement(run_sql, con):
+    assert run_sql("select 1' ; drop table products -- '").startswith(
+        ("rejected:", "error:")
+    )
+    assert con.execute("select count(*) from products").fetchone()[0] == 14
+
+
+def test_the_guard_agrees_with_duckdbs_own_parser(con):
+    """Any disagreement between guard and engine is where a bypass lives."""
+    from refusal_bench.tools import _reject
+
+    for sql in [
+        "select '/*' ; drop table products /*' */",
+        "select 1; select 2",
+        "select 'a;b' as x",
+        "with x as (select 1 as a) select a from x",
+    ]:
+        try:
+            n = len(con.extract_statements(sql))
+        except Exception:
+            continue
+        rejected = _reject(con, sql) is not None
+        assert rejected == (n != 1) or rejected, f"guard disagrees with parser on {sql!r}"

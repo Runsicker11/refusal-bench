@@ -133,3 +133,22 @@ def test_a_malformed_review_decision_fails_closed():
     assert state["stop_reason"] == "rejected"
     assert state["finding"] is None
     assert "malformed" in state["review_note"]
+
+
+def test_a_finding_on_the_last_allowed_step_still_gets_reviewed():
+    """The regression the first fix introduced.
+
+    Checking the budget before `stop_reason` meant a model that concluded on
+    the same step that exhausted its allowance published without review --
+    common, since agents often use the whole budget before concluding.
+    """
+    session = ReviewSession(
+        ScriptedModel([ModelResponse(text="stockout detected")]), TOOLS, max_steps=1
+    )
+    pending = session.start("orders fell 22%")
+
+    assert pending is not None, "a real finding must never publish unreviewed"
+    assert pending["finding"] == "stockout detected"
+
+    session.respond("reject", "not supported by the evidence")
+    assert session.state["finding"] is None

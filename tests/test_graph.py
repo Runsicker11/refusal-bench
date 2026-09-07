@@ -122,13 +122,34 @@ def test_a_raising_tool_does_not_kill_the_run():
     assert out["stop_reason"] == "concluded"
 
 
-def test_runs_do_not_share_evidence():
-    """A module-level START_STATE shared one list across every investigation."""
-    model = lambda: ScriptedModel([
-        ModelResponse(tool_call=ToolCall("echo", {})),
+def test_start_state_hands_out_a_fresh_list_every_time():
+    """The earlier version of this test was vacuous.
+
+    It ran two investigations and asserted each saw one piece of evidence --
+    which passed even with the shared module-level dict restored, because no
+    node currently appends in place. Assert the actual property instead:
+    successive callers must not receive the same list object.
+    """
+    from refusal_bench.graph import start_state
+
+    a, b = start_state(), start_state()
+    assert a["evidence"] is not b["evidence"]
+
+    a["evidence"].append({"step": 0, "tool": "x", "args": {}, "result": "y"})
+    assert b["evidence"] == [], "a mutation by one run reached another"
+    assert start_state()["evidence"] == []
+
+
+def test_a_tool_with_an_internal_type_error_is_not_blamed_on_the_model():
+    """"Bad arguments" invites a retry that cannot fix a broken tool."""
+    def buggy(**kwargs):
+        return 1 + None  # TypeError from inside the tool
+
+    model = ScriptedModel([
+        ModelResponse(tool_call=ToolCall("buggy", {})),
         ModelResponse(text="done"),
     ])
-    first = investigate(model(), TOOLS, "a")
-    second = investigate(model(), TOOLS, "b")
-    assert len(first["evidence"]) == 1
-    assert len(second["evidence"]) == 1
+    out = investigate(model, {"buggy": buggy}, "x")
+    result = out["evidence"][0]["result"]
+    assert "failed: TypeError" in result
+    assert "bad arguments" not in result
