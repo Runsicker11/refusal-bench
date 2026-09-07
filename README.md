@@ -30,44 +30,57 @@ Very little of it describes where the data *runs out*: which questions the
 warehouse genuinely cannot answer, and what the agent should say when it meets
 one. That boundary is a design surface, and it is testable.
 
-## What's in here
+## What works today
 
 - A synthetic warehouse for **Baseline Athletic**, a fictional D2C and
   marketplace sporting-goods brand. One DuckDB file, deterministic seed, no
-  cloud account and no credentials required.
+  cloud account and no credentials required. Six deliberate gaps, each pinned
+  by a test so it cannot be quietly filled in.
 - An annotated semantic layer over it — field meanings, topic routing, and
-  explicit coverage boundaries.
-- A golden question bank with hidden answers, plus the trap cases above.
-- Deterministic grading, and an LLM-as-judge layer for refusal *quality*
-  (does the agent explain what is missing, or just stonewall?) with a measured
-  judge/human agreement rate.
-- **A CI ratchet.** `floors.json` holds a committed pass rate per category.
-  Passing raises the floor; regressing fails the build. Quality is structurally
-  monotonic — it cannot get worse without someone noticing.
+  explicit coverage boundaries, validated against the live warehouse schema.
+- A LangGraph investigation loop with one tool (`run_sql`), budgets that halt
+  it, and an optional human review checkpoint.
+- OpenTelemetry tracing on the GenAI semantic conventions, with token and cost
+  accounting. See [docs/observability.md](docs/observability.md).
+
+## Not built yet
+
+The trap taxonomy above is the design, not the implementation. None of this
+exists in the repo today:
+
+- The golden question bank and the trap cases
+- The investigating agent — hypothesis generation, evidence narrowing,
+  explanation with cited evidence
+- Deterministic grading and the LLM-as-judge layer
+- The CI ratchet and `floors.json`
+
+Tracked in [PLAN.md](PLAN.md) and the
+[issues](https://github.com/Runsicker11/refusal-bench/issues).
 
 ## Status
 
-Early. Building in public, one issue at a time. See the
-[issues](https://github.com/Runsicker11/refusal-bench/issues) for the plan.
+Early, and built in the open. Phases 0–2 of six are done. If a claim in this
+README is not in the list above, it has not been written yet — for a project
+about systems that overstate what they know, a README that does the same thing
+would be a poor start.
 
 ## Running it
 
 ```bash
 uv sync
-uv run python -m warehouse.seed      # builds baseline.duckdb
-uv run pytest                        # deterministic grading
-uv run python -m refusal_bench.ratchet --check
+uv run python -m warehouse.seed   # builds baseline.duckdb
+uv run pytest                     # 80 tests, no API key, no network
 ```
 
-The deterministic suite needs no API key. The judge layer needs
-`ANTHROPIC_API_KEY`.
+Nothing here needs a model key yet. The agent runs against a scripted model in
+tests; a real provider adapter arrives with the investigator.
 
 ## Built with its own tooling
 
-`.claude/skills/` contains the Claude Code skills used to build and maintain
-this repo — adding a trap case, annotating a semantic topic, triaging a failing
-eval. The harness is developed with the same kind of agent tooling it exists to
-measure.
+Planned, not present. Skills for adding a trap case, annotating a semantic
+topic, and triaging a failing eval are
+[issues #18–#20](https://github.com/Runsicker11/refusal-bench/issues/18) — they
+will land alongside the eval suite they operate on.
 
 ## License
 

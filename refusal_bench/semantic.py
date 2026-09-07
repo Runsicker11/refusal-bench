@@ -109,6 +109,14 @@ def validate(topics: list[Topic], schema: dict[str, set[str]]) -> list[str]:
                     f"{where}: refusal '{r.ask}' has no 'instead' — a refusal "
                     f"with no alternative is a stonewall"
                 )
+            elif len(r.instead.split()) < 8:
+                # Presence of the key is not the same as usefulness of its
+                # content. "see the dashboard" satisfies a non-empty check and
+                # is still a stonewall to the person who asked.
+                errors.append(
+                    f"{where}: the alternative for '{r.ask}' is too thin to "
+                    f"act on — name a question this topic can actually answer"
+                )
 
     return errors
 

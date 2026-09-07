@@ -143,8 +143,21 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
                 "steps": state.get("step"),
             }
         )
-        action = (decision or {}).get("action", "accept")
-        note = (decision or {}).get("note", "")
+        # Fail closed. A malformed or missing resume payload defaulting to
+        # "accept" would publish a finding no person actually approved, which
+        # is the one way the review invariant can silently fail open.
+        if not isinstance(decision, dict) or decision.get("action") not in (
+            "accept",
+            "reject",
+            "redirect",
+        ):
+            return {
+                "finding": None,
+                "stop_reason": "rejected",
+                "review_note": f"malformed review decision: {decision!r}",
+            }
+        action = decision["action"]
+        note = decision.get("note", "")
 
         if action == "reject":
             return {"finding": None, "stop_reason": "rejected", "review_note": note}

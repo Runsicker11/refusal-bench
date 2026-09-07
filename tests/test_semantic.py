@@ -107,3 +107,19 @@ def test_load_and_validate_raises_on_bad_layer(con, tmp_path):
     )
     with pytest.raises(ValueError, match="semantic layer is invalid"):
         load_and_validate(con, tmp_path)
+
+
+def test_a_token_alternative_is_still_a_stonewall(con):
+    """Non-empty is not the same as useful.
+
+    Found in the 2026-09-07 adversarial review: `because` was checked for
+    substance and `instead` only for non-emptiness, so "see the dashboard"
+    passed the very check built to prevent stonewalling.
+    """
+    bad = _topic(refuses=[Refusal(
+        ask="blended return on ad spend",
+        because="ad_spend carries platform-attributed revenue only and cannot be joined to orders at this grain",
+        instead="see the dashboard",
+    )])
+    errors = validate([bad], warehouse_schema(con))
+    assert any("too thin to act on" in e for e in errors)

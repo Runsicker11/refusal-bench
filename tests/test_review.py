@@ -121,3 +121,15 @@ def test_budget_halt_never_becomes_accepted():
     assert state["stop_reason"] == "budget"
     assert "step ceiling" in state["stop_detail"]
     assert state["finding"] is None
+
+
+def test_a_malformed_review_decision_fails_closed():
+    """Defaulting to accept would publish a finding nobody approved."""
+    session = ReviewSession(ScriptedModel([ModelResponse(text="demand softened")]), TOOLS)
+    session.start("orders fell 22%")
+    session.respond("nonsense-action", "typo")
+
+    state = session.state
+    assert state["stop_reason"] == "rejected"
+    assert state["finding"] is None
+    assert "malformed" in state["review_note"]
