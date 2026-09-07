@@ -89,3 +89,46 @@ def test_scripted_model_exhaustion_is_a_loud_failure():
     model = ScriptedModel([ModelResponse(tool_call=ToolCall("echo", {}))])
     with pytest.raises(AssertionError, match="ran out of responses"):
         investigate(model, TOOLS, "x", max_steps=50)
+
+
+# --- regressions from the 2026-09-06 review ---
+
+def test_bad_tool_arguments_are_recoverable():
+    """The commonest tool-call mistake a model makes, and one it can fix."""
+    def run_sql(query: str) -> str:
+        return "rows"
+
+    model = ScriptedModel([
+        ModelResponse(tool_call=ToolCall("run_sql", {"sql": "select 1"})),
+        ModelResponse(tool_call=ToolCall("run_sql", {"query": "select 1"})),
+        ModelResponse(text="done"),
+    ])
+    out = investigate(model, {"run_sql": run_sql}, "x")
+    assert "bad arguments" in out["evidence"][0]["result"]
+    assert out["evidence"][1]["result"] == "rows"
+    assert out["stop_reason"] == "concluded"
+
+
+def test_a_raising_tool_does_not_kill_the_run():
+    def boom(**kwargs):
+        raise RuntimeError("connection closed")
+
+    model = ScriptedModel([
+        ModelResponse(tool_call=ToolCall("boom", {})),
+        ModelResponse(text="recovered"),
+    ])
+    out = investigate(model, {"boom": boom}, "x")
+    assert "RuntimeError: connection closed" in out["evidence"][0]["result"]
+    assert out["stop_reason"] == "concluded"
+
+
+def test_runs_do_not_share_evidence():
+    """A module-level START_STATE shared one list across every investigation."""
+    model = lambda: ScriptedModel([
+        ModelResponse(tool_call=ToolCall("echo", {})),
+        ModelResponse(text="done"),
+    ])
+    first = investigate(model(), TOOLS, "a")
+    second = investigate(model(), TOOLS, "b")
+    assert len(first["evidence"]) == 1
+    assert len(second["evidence"]) == 1

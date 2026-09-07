@@ -102,3 +102,22 @@ def test_waiting_costs_nothing():
 
     assert session.state["finding"] == "stockout"
     assert len(model.calls) == calls_while_paused
+
+
+# --- regressions from the 2026-09-06 review ---
+
+def test_budget_halt_never_becomes_accepted():
+    """A run that ran out of budget has nothing for a human to accept.
+
+    Routing the breach through review let an exhausted run be recorded as
+    'accepted' with no finding and no stop_detail -- a truncated investigation
+    indistinguishable from a real answer.
+    """
+    model = ScriptedModel([ModelResponse(tool_call=ToolCall("echo", {}))] * 20)
+    session = ReviewSession(model, TOOLS, max_steps=2)
+
+    assert session.start("orders fell 22%") is None, "must not pause for review"
+    state = session.state
+    assert state["stop_reason"] == "budget"
+    assert "step ceiling" in state["stop_detail"]
+    assert state["finding"] is None

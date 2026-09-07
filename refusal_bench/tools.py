@@ -2,10 +2,17 @@
 
 `run_sql` is the only one for now. Three properties matter more than features:
 
-**It is read-only, and that is enforced here rather than trusted.** The SQL is
-written by a language model, which makes it untrusted input. A read-only DuckDB
-connection is the belt; the statement guard below is the braces. Either alone
-would probably hold. Both is cheap.
+**It cannot modify the database, and that is enforced rather than trusted.**
+The SQL is written by a language model, which makes it untrusted input. Two
+independent guards: `connect_readonly` opens the file in DuckDB's read-only
+mode, and the statement guard below rejects anything that does not begin with
+SELECT or WITH.
+
+**This is not a sandbox, and the distinction matters.** DuckDB table functions
+are ordinary SELECT expressions, so `select * from read_csv('/etc/passwd')`
+passes the guard and reads the file. Scoped to a synthetic warehouse this is
+acceptable; pointed at anything real, the tool needs a filesystem policy on top
+of these guards, not instead of them.
 
 **A bad query is information, not a crash.** Syntax errors, missing tables and
 type mismatches all come back as text the model can read and act on. An
@@ -31,11 +38,19 @@ MAX_CHARS = 4000
 _ALLOWED_START = ("select", "with")
 
 _COMMENT = re.compile(r"--[^\n]*|/\*.*?\*/", re.DOTALL)
+# Single-quoted literals, doubled '' escapes included. Blanked before the
+# statement is inspected so punctuation inside a string cannot be mistaken for
+# syntax -- a filter on text containing a semicolon is a valid query.
+_STRING = re.compile(r"'(?:[^']|'')*'")
 
 
 def _reject(sql: str) -> str | None:
-    """Return a refusal reason, or None if the statement may run."""
-    stripped = _COMMENT.sub(" ", sql).strip()
+    """Return a refusal reason, or None if the statement may run.
+
+    Inspects a copy with comments removed and string literals blanked, so the
+    checks below see structure rather than content.
+    """
+    stripped = _STRING.sub("''", _COMMENT.sub(" ", sql)).strip()
     if not stripped:
         return "empty query"
 
@@ -48,6 +63,16 @@ def _reject(sql: str) -> str | None:
     if first not in _ALLOWED_START:
         return f"only SELECT and WITH are allowed, got {first.upper() or 'nothing'!r}"
     return None
+
+
+def connect_readonly(path: str) -> duckdb.DuckDBPyConnection:
+    """Open the warehouse in DuckDB's read-only mode.
+
+    The statement guard would probably hold on its own. This is the second
+    guard, so that relaxing the first one later -- to allow EXPLAIN, say --
+    does not silently remove the only protection.
+    """
+    return duckdb.connect(path, read_only=True)
 
 
 def make_run_sql(

@@ -94,3 +94,36 @@ def test_char_cap_is_enforced_and_disclosed(con):
     out = make_run_sql(con, max_rows=1000, max_chars=200)("select * from orders")
     assert len(out) < 400
     assert "output truncated" in out
+
+
+# --- regressions from the 2026-09-06 review ---
+
+def test_semicolon_inside_a_string_literal_is_allowed(run_sql):
+    """Splitting on a raw ';' rejected valid queries filtering on text."""
+    assert run_sql("select 'a;b' as x").splitlines()[1] == "a;b"
+
+
+def test_escaped_quotes_do_not_confuse_the_guard(run_sql):
+    assert not run_sql("select 'it''s fine' as x").startswith("rejected:")
+
+
+def test_a_write_hidden_in_a_string_is_still_rejected(run_sql):
+    """Blanking literals must not open a hole."""
+    assert run_sql("select 'x'; drop table products").startswith("rejected:")
+
+
+def test_connect_readonly_actually_blocks_writes(tmp_path):
+    """The second guard the docstring promises now exists."""
+    import duckdb
+    from refusal_bench.tools import connect_readonly
+
+    path = str(tmp_path / "w.duckdb")
+    seed = duckdb.connect(path)
+    seed.execute("create table t (a int)")
+    seed.close()
+
+    con = connect_readonly(path)
+    assert con.execute("select current_setting('access_mode')").fetchone()[0] .lower() == "read_only"
+    with pytest.raises(duckdb.Error):
+        con.execute("insert into t values (1)")
+    con.close()

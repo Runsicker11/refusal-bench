@@ -61,6 +61,7 @@ def _own_provider() -> TracerProvider | None:
 
 
 _memory_attached = False
+_configured: set[str] = set()
 
 
 def _install() -> TracerProvider:
@@ -89,6 +90,10 @@ def configure(exporter: str = "console") -> None:
         OTEL_EXPORTER_OTLP_ENDPOINT=https://api.honeycomb.io
         OTEL_EXPORTER_OTLP_HEADERS=x-honeycomb-team=<your key>
     """
+    if exporter in _configured:
+        # Adding a second processor would export every span twice -- doubling
+        # a Honeycomb bill, and doubling any count read off it.
+        return
     provider = _install()
     if exporter == "console":
         provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
@@ -106,6 +111,7 @@ def configure(exporter: str = "console") -> None:
         provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     else:
         raise ValueError(f"unknown exporter {exporter!r}; use 'console' or 'otlp'")
+    _configured.add(exporter)
 
 
 @contextmanager
