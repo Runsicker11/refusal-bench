@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --all-extras --dev
+      # No secrets, on purpose. The whole suite -- warehouse, semantic layer,
+      # graph, tools, telemetry -- runs with no model key and no telemetry
+      # backend, so CI works on pull requests from forks.
+      - run: uv run python -m warehouse.seed
+      - run: uv run pytest -q
