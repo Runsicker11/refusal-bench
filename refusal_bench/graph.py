@@ -40,7 +40,10 @@ Tool = Callable[..., str]
 
 
 def _prompt(state: InvestigationState) -> str:
-    lines = [f"Anomaly under investigation: {state['anomaly']}", ""]
+    lines = []
+    if state.get("context"):
+        lines += [state["context"], ""]
+    lines += [f"Anomaly under investigation: {state['anomaly']}", ""]
     if state.get("evidence"):
         lines.append("Evidence so far:")
         for e in state["evidence"]:
@@ -256,7 +259,7 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
     return graph.compile()
 
 
-def start_state() -> dict:
+def start_state(context: str = "") -> dict:
     """A fresh starting state.
 
     A function, not a module constant: a shared `evidence` list would be the
@@ -270,6 +273,7 @@ def start_state() -> dict:
         "input_tokens": 0,
         "output_tokens": 0,
         "cost_usd": 0.0,
+        "context": context,
     }
 
 
@@ -279,13 +283,14 @@ def investigate(
     anomaly: str,
     max_steps: int = 8,
     max_usd: float | None = None,
+    context: str = "",
 ):
     """Run to completion with no human in the loop."""
     with tel.tracer.start_as_current_span("invoke_agent") as span:
         span.set_attribute(tel.OPERATION_NAME, "invoke_agent")
         out = build_graph(model, tools).invoke(
             {
-                **start_state(),
+                **start_state(context),
                 "anomaly": anomaly,
                 "max_steps": max_steps,
                 "max_usd": max_usd,

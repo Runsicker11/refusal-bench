@@ -1,0 +1,46 @@
+topic: marketplace
+description: >
+  Orders placed through Vantage Market, the one marketplace we sell on.
+grain: [mp_order_id]
+tables: [marketplace_orders]
+
+fields:
+  mp_order_id:
+    means: One marketplace order line. Unique.
+  marketplace:
+    means: The marketplace name. Only ever Vantage Market.
+  ordered_at:
+    means: The day the order was placed.
+  sku:
+    means: Product SKU. Joins to products by sku, not by product_id.
+  quantity:
+    means: Units sold on that line.
+  item_price:
+    means: Price per unit at the marketplace, which drifts from our list price.
+  fees:
+    means: Marketplace commission and fulfilment fees deducted from the sale.
+    caveat: >
+      Fees are the marketplace's deduction only. Our own cost of goods is in
+      the products topic and is not netted out here.
+
+routes_here:
+  - marketplace revenue by month
+  - marketplace units by SKU
+  - marketplace fee rate
+  - marketplace share of total units
+
+refuses:
+  - ask: revenue from any marketplace other than Vantage
+    because: >
+      This table contains a single marketplace. There is no table listing
+      other marketplaces, and nothing here indicates whether we sell on any.
+    instead: Vantage Market revenue, described explicitly as one marketplace.
+
+  - ask: marketplace profit or contribution margin
+    because: >
+      Fees here are the marketplace's deduction only. Cost of goods is in the
+      products topic at a different grain and advertising is in ad_efficiency
+      with no marketplace split, so no profit figure can be assembled.
+    instead: >
+      Marketplace revenue net of marketplace fees, labelled as net of fees
+      rather than as profit.

@@ -94,8 +94,10 @@ nothing else in the repo would fail.
 Each phase ends with something that runs.
 
 ### Phase 0 — Foundation ✅
-Warehouse, semantic layer format, validator.
-`#1` ✅ · `#2` ✅ · `#3`
+Warehouse, semantic layer format, validator, four annotated topics, and the
+three-arm context harness that measures what the layer is worth.
+See [docs/three-arms.md](docs/three-arms.md).
+`#1` ✅ · `#2` ✅ · `#3` ✅ · `#43` ✅
 
 ### Phase 1 — Agent skeleton
 The thinnest LangGraph loop that terminates. State schema, one tool, one

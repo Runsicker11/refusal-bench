@@ -1,0 +1,39 @@
+topic: competitive
+description: >
+  Quarterly share estimates for us and two rival brands, from a syndicated
+  panel.
+grain: [quarter, brand]
+tables: [competitor_share]
+
+fields:
+  quarter:
+    means: Calendar quarter, as 2026Q2.
+  brand:
+    means: Baseline Athletic, Rally Sports, or Northcourt. Only these three.
+  share_pct:
+    means: That brand's share of the panel, as a fraction.
+    caveat: >
+      The three brands here do not sum to the category. The remainder is
+      everyone else, and there is no row for it.
+
+routes_here:
+  - our share trend by quarter
+  - share versus Rally Sports or Northcourt
+  - quarter over quarter share change
+
+refuses:
+  - ask: our share of the total category
+    because: >
+      The panel covers three brands and their shares sum to roughly 60% of the
+      market. The remaining 40% has no row, so a category denominator cannot be
+      constructed from this table.
+    instead: >
+      Our share of the panel, stated as panel share rather than category share,
+      and the trend in it over time.
+
+  - ask: share for a brand not in the panel
+    because: >
+      Only Baseline Athletic, Rally Sports and Northcourt appear. A brand
+      absent from the panel has no data here and cannot be inferred from the
+      three that are present.
+    instead: Share for whichever of the three covered brands is closest to the question.

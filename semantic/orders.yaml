@@ -1,0 +1,66 @@
+topic: orders
+description: >
+  Direct-to-consumer orders and their line items. The revenue topic for
+  anything sold through our own storefront.
+grain: [order_id]
+tables: [orders, order_items, products]
+
+fields:
+  order_id:
+    means: One checkout. Unique.
+  customer_id:
+    means: The buyer. Joins to the customers topic.
+  ordered_at:
+    means: The day the order was placed.
+  country:
+    means: Ship-to country, copied onto the order at checkout.
+  subtotal:
+    means: Line items before discount and shipping.
+  discount:
+    means: Promotional discount applied at checkout.
+    caveat: >
+      A flat amount, not a code. Which promotion produced it is not recorded,
+      so discount cannot be attributed to a campaign.
+  shipping:
+    means: Shipping charged to the customer. Zero above the free-shipping threshold.
+  total:
+    means: What the customer paid. subtotal minus discount plus shipping.
+  quantity:
+    means: Units of one product on one order line.
+  line_total:
+    means: unit_price times quantity for that line.
+
+routes_here:
+  - direct-to-consumer revenue by month
+  - average order value
+  - units sold by product
+  - discount rate over time
+  - orders by country
+
+refuses:
+  - ask: total company revenue across every channel
+    because: >
+      This topic covers the direct storefront only. Marketplace revenue lives
+      in a separate table at a different grain with its own fee structure, and
+      there is no reconciled cross-channel total anywhere in the warehouse.
+    instead: >
+      Direct-to-consumer revenue from this topic and marketplace revenue from
+      the marketplace topic, reported side by side and labelled as separate
+      channels.
+
+  - ask: which promotion drove a spike in orders
+    because: >
+      The orders table records a discount amount but not which promotion or
+      code produced it, so two concurrent promotions are indistinguishable in
+      this data.
+    instead: >
+      Discounted order count and average discount over the period, which shows
+      that discounting rose without claiming which promotion caused it.
+
+  - ask: net revenue after returns
+    because: >
+      There is no returns or refunds table in this warehouse at all. Every
+      revenue figure here is gross, and no adjustment is possible.
+    instead: >
+      Gross direct-to-consumer revenue by month, labelled as gross and with
+      the absence of any returns adjustment stated alongside it.

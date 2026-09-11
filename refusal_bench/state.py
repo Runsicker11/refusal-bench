@@ -26,6 +26,9 @@ class Evidence(TypedDict):
 class InvestigationState(TypedDict, total=False):
     # Input
     anomaly: str
+    # What the agent was told about the warehouse. Varies by arm, which is how
+    # the contribution of the semantic layer gets measured rather than assumed.
+    context: str
 
     # Working memory
     hypotheses: list[str]

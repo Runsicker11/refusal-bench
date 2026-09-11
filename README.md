@@ -42,6 +42,9 @@ one. That boundary is a design surface, and it is testable.
   it, and an optional human review checkpoint.
 - OpenTelemetry tracing on the GenAI semantic conventions, with token and cost
   accounting. See [docs/observability.md](docs/observability.md).
+- A three-arm context harness, so the contribution of the semantic layer can be
+  measured rather than assumed, and two deliberately held-out warehouse gaps.
+  See [docs/three-arms.md](docs/three-arms.md).
 
 ## Not built yet
 
