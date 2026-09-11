@@ -23,6 +23,7 @@ narrowing (#31), no refusal (#33).
 
 from __future__ import annotations
 
+import inspect
 from typing import Callable
 
 from langgraph.checkpoint.memory import InMemorySaver
@@ -31,7 +32,7 @@ from langgraph.types import interrupt
 
 from refusal_bench import telemetry as tel
 from refusal_bench.cost import Budget, price_of
-from refusal_bench.model import Model
+from refusal_bench.model import Model, ToolCall
 from refusal_bench.state import InvestigationState
 
 # A tool is a named callable taking kwargs and returning text the model can read.
@@ -82,10 +83,16 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
         }
         if response.tool_call is None:
             return {**totals, "finding": response.text, "stop_reason": "concluded"}
-        return {**totals, "_pending": response.tool_call}
+        # Stored as a plain dict: LangGraph checkpoints this state, and
+        # serialising a custom dataclass is a deprecated path it warns about
+        # and will block in a future version.
+        return {
+            **totals,
+            "_pending": {"name": response.tool_call.name, "args": dict(response.tool_call.args)},
+        }
 
     def act(state: InvestigationState) -> dict:
-        call = state["_pending"]
+        call = ToolCall(**state["_pending"])
         with tel.tracer.start_as_current_span("execute_tool") as span:
             span.set_attribute(tel.OPERATION_NAME, "execute_tool")
             span.set_attribute(tel.TOOL_NAME, call.name)
@@ -101,7 +108,25 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
                 # not a crash. Same principle as a malformed query in #24.
                 result = f"error: no tool named {call.name!r}. available: {sorted(tools)}"
             else:
-                result = tool(**call.args)
+                try:
+                    # Bind first, so a signature mismatch is distinguishable
+                    # from a TypeError raised inside the tool. Catching bare
+                    # TypeError around the call conflates "you passed the wrong
+                    # argument names" with "this tool has a bug", and the first
+                    # message invites a retry that cannot help with the second.
+                    inspect.signature(tool).bind(**call.args)
+                except TypeError as exc:
+                    result = f"error: bad arguments for {call.name!r}: {exc}"
+                else:
+                    try:
+                        result = tool(**call.args)
+                    except Exception as exc:  # noqa: BLE001 - the boundary is the point
+                        result = (
+                            f"error: {call.name!r} failed: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        span.record_exception(exc)
+            result = str(result)
             span.set_attribute(tel.TOOL_RESULT_CHARS, len(result))
         return {
             "evidence": [
@@ -128,8 +153,21 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
                 "steps": state.get("step"),
             }
         )
-        action = (decision or {}).get("action", "accept")
-        note = (decision or {}).get("note", "")
+        # Fail closed. A malformed or missing resume payload defaulting to
+        # "accept" would publish a finding no person actually approved, which
+        # is the one way the review invariant can silently fail open.
+        if not isinstance(decision, dict) or decision.get("action") not in (
+            "accept",
+            "reject",
+            "redirect",
+        ):
+            return {
+                "finding": None,
+                "stop_reason": "rejected",
+                "review_note": f"malformed review decision: {decision!r}",
+            }
+        action = decision["action"]
+        note = decision.get("note", "")
 
         if action == "reject":
             return {"finding": None, "stop_reason": "rejected", "review_note": note}
@@ -168,9 +206,22 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
         }
 
     def decide(state: InvestigationState) -> str:
-        """Keep going, or stop. The only edge that can end the run."""
+        """Keep going, review, or stop outright.
+
+        Order matters, and it is subtle.
+
+        A finding is checked first: if the model concluded, a person sees it,
+        even when that same step exhausted the budget. Checking the budget
+        first published real findings without review whenever the agent used
+        its whole allowance before concluding -- which is common, not exotic.
+
+        Only when there is no finding does a breach send the run straight to
+        `conclude`, skipping review. There is nothing for a person to accept,
+        and routing that through review let an exhausted run be recorded as
+        'accepted'.
+        """
         if state.get("stop_reason"):
-            return "conclude"
+            return "review" if review else "conclude"
         budget = Budget(
             max_steps=state.get("max_steps", 8), max_usd=state.get("max_usd")
         )
@@ -193,21 +244,33 @@ def build_graph(model: Model, tools: dict[str, Tool], review: bool = False):
 
     if review:
         graph.add_node("review", review_node)
-        graph.add_conditional_edges("think", decide, {"act": "act", "conclude": "review"})
-        graph.add_conditional_edges("review", after_review, {"think": "think", "conclude": "conclude"})
+        graph.add_conditional_edges(
+            "think", decide, {"act": "act", "review": "review", "conclude": "conclude"}
+        )
+        graph.add_conditional_edges(
+            "review", after_review, {"think": "think", "conclude": "conclude"}
+        )
         return graph.compile(checkpointer=InMemorySaver())
 
     graph.add_conditional_edges("think", decide, {"act": "act", "conclude": "conclude"})
     return graph.compile()
 
 
-START_STATE = {
-    "evidence": [],
-    "step": 0,
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cost_usd": 0.0,
-}
+def start_state() -> dict:
+    """A fresh starting state.
+
+    A function, not a module constant: a shared `evidence` list would be the
+    same object in every run, so the first node that appends in place instead
+    of returning a new list would cross-contaminate every subsequent
+    investigation in the process.
+    """
+    return {
+        "evidence": [],
+        "step": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_usd": 0.0,
+    }
 
 
 def investigate(
@@ -222,7 +285,7 @@ def investigate(
         span.set_attribute(tel.OPERATION_NAME, "invoke_agent")
         out = build_graph(model, tools).invoke(
             {
-                **START_STATE,
+                **start_state(),
                 "anomaly": anomaly,
                 "max_steps": max_steps,
                 "max_usd": max_usd,

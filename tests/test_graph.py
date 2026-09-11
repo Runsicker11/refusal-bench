@@ -89,3 +89,67 @@ def test_scripted_model_exhaustion_is_a_loud_failure():
     model = ScriptedModel([ModelResponse(tool_call=ToolCall("echo", {}))])
     with pytest.raises(AssertionError, match="ran out of responses"):
         investigate(model, TOOLS, "x", max_steps=50)
+
+
+# --- regressions from the 2026-09-06 review ---
+
+def test_bad_tool_arguments_are_recoverable():
+    """The commonest tool-call mistake a model makes, and one it can fix."""
+    def run_sql(query: str) -> str:
+        return "rows"
+
+    model = ScriptedModel([
+        ModelResponse(tool_call=ToolCall("run_sql", {"sql": "select 1"})),
+        ModelResponse(tool_call=ToolCall("run_sql", {"query": "select 1"})),
+        ModelResponse(text="done"),
+    ])
+    out = investigate(model, {"run_sql": run_sql}, "x")
+    assert "bad arguments" in out["evidence"][0]["result"]
+    assert out["evidence"][1]["result"] == "rows"
+    assert out["stop_reason"] == "concluded"
+
+
+def test_a_raising_tool_does_not_kill_the_run():
+    def boom(**kwargs):
+        raise RuntimeError("connection closed")
+
+    model = ScriptedModel([
+        ModelResponse(tool_call=ToolCall("boom", {})),
+        ModelResponse(text="recovered"),
+    ])
+    out = investigate(model, {"boom": boom}, "x")
+    assert "RuntimeError: connection closed" in out["evidence"][0]["result"]
+    assert out["stop_reason"] == "concluded"
+
+
+def test_start_state_hands_out_a_fresh_list_every_time():
+    """The earlier version of this test was vacuous.
+
+    It ran two investigations and asserted each saw one piece of evidence --
+    which passed even with the shared module-level dict restored, because no
+    node currently appends in place. Assert the actual property instead:
+    successive callers must not receive the same list object.
+    """
+    from refusal_bench.graph import start_state
+
+    a, b = start_state(), start_state()
+    assert a["evidence"] is not b["evidence"]
+
+    a["evidence"].append({"step": 0, "tool": "x", "args": {}, "result": "y"})
+    assert b["evidence"] == [], "a mutation by one run reached another"
+    assert start_state()["evidence"] == []
+
+
+def test_a_tool_with_an_internal_type_error_is_not_blamed_on_the_model():
+    """"Bad arguments" invites a retry that cannot fix a broken tool."""
+    def buggy(**kwargs):
+        return 1 + None  # TypeError from inside the tool
+
+    model = ScriptedModel([
+        ModelResponse(tool_call=ToolCall("buggy", {})),
+        ModelResponse(text="done"),
+    ])
+    out = investigate(model, {"buggy": buggy}, "x")
+    result = out["evidence"][0]["result"]
+    assert "failed: TypeError" in result
+    assert "bad arguments" not in result

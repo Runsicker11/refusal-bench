@@ -102,3 +102,53 @@ def test_waiting_costs_nothing():
 
     assert session.state["finding"] == "stockout"
     assert len(model.calls) == calls_while_paused
+
+
+# --- regressions from the 2026-09-06 review ---
+
+def test_budget_halt_never_becomes_accepted():
+    """A run that ran out of budget has nothing for a human to accept.
+
+    Routing the breach through review let an exhausted run be recorded as
+    'accepted' with no finding and no stop_detail -- a truncated investigation
+    indistinguishable from a real answer.
+    """
+    model = ScriptedModel([ModelResponse(tool_call=ToolCall("echo", {}))] * 20)
+    session = ReviewSession(model, TOOLS, max_steps=2)
+
+    assert session.start("orders fell 22%") is None, "must not pause for review"
+    state = session.state
+    assert state["stop_reason"] == "budget"
+    assert "step ceiling" in state["stop_detail"]
+    assert state["finding"] is None
+
+
+def test_a_malformed_review_decision_fails_closed():
+    """Defaulting to accept would publish a finding nobody approved."""
+    session = ReviewSession(ScriptedModel([ModelResponse(text="demand softened")]), TOOLS)
+    session.start("orders fell 22%")
+    session.respond("nonsense-action", "typo")
+
+    state = session.state
+    assert state["stop_reason"] == "rejected"
+    assert state["finding"] is None
+    assert "malformed" in state["review_note"]
+
+
+def test_a_finding_on_the_last_allowed_step_still_gets_reviewed():
+    """The regression the first fix introduced.
+
+    Checking the budget before `stop_reason` meant a model that concluded on
+    the same step that exhausted its allowance published without review --
+    common, since agents often use the whole budget before concluding.
+    """
+    session = ReviewSession(
+        ScriptedModel([ModelResponse(text="stockout detected")]), TOOLS, max_steps=1
+    )
+    pending = session.start("orders fell 22%")
+
+    assert pending is not None, "a real finding must never publish unreviewed"
+    assert pending["finding"] == "stockout detected"
+
+    session.respond("reject", "not supported by the evidence")
+    assert session.state["finding"] is None

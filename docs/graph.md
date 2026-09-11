@@ -52,7 +52,8 @@ graph TD;
 	review -.-> conclude;
 	review -.-> think;
 	think -.-> act;
-	think -. &nbsp;conclude&nbsp; .-> review;
+	think -.-> conclude;
+	think -.-> review;
 	conclude --> __end__;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0

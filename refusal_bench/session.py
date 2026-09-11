@@ -19,7 +19,7 @@ from typing import Any
 from langgraph.types import Command
 
 from refusal_bench import telemetry as tel
-from refusal_bench.graph import START_STATE, Tool, build_graph
+from refusal_bench.graph import Tool, build_graph, start_state
 from refusal_bench.model import Model
 
 _threads = count(1)
@@ -48,7 +48,7 @@ class ReviewSession:
             span.set_attribute(tel.OPERATION_NAME, "invoke_agent")
             out = self._graph.invoke(
                 {
-                    **START_STATE,
+                    **start_state(),
                     "anomaly": anomaly,
                     "max_steps": self._max_steps,
                     "max_usd": self._max_usd,

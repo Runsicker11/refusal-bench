@@ -101,7 +101,7 @@ Warehouse, semantic layer format, validator.
 The thinnest LangGraph loop that terminates. State schema, one tool, one
 human-in-the-loop interrupt. No hypothesis logic, no refusal, no evals.
 Diagram: [docs/graph.md](docs/graph.md), generated from the compiled graph.
-`#12` ✅ · `#24` · `#25`
+`#12` ✅ · `#24` ✅ · `#25` ✅
 
 ### Phase 2 — Instrumentation ✅
 OTel GenAI spans, token and cost accounting, budgets that halt a runaway loop,
