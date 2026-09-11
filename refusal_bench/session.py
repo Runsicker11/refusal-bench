@@ -32,11 +32,13 @@ class ReviewSession:
         tools: dict[str, Tool],
         max_steps: int = 8,
         max_usd: float | None = None,
+        context: str = "",
     ):
         self._graph = build_graph(model, tools, review=True)
         self._config = {"configurable": {"thread_id": f"run-{next(_threads)}"}}
         self._max_steps = max_steps
         self._max_usd = max_usd
+        self._context = context
 
     @property
     def state(self) -> dict[str, Any]:
@@ -48,7 +50,7 @@ class ReviewSession:
             span.set_attribute(tel.OPERATION_NAME, "invoke_agent")
             out = self._graph.invoke(
                 {
-                    **start_state(),
+                    **start_state(self._context),
                     "anomaly": anomaly,
                     "max_steps": self._max_steps,
                     "max_usd": self._max_usd,

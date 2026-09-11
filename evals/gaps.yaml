@@ -1,0 +1,57 @@
+# Which warehouse gaps the semantic layer is allowed to document.
+#
+# The trap taxonomy has a circularity problem: the same author writes the
+# `refuses` blocks and the trap cases that check for refusal. Graded only on
+# the documented gaps, the benchmark measures whether the agent can paraphrase
+# something it was handed.
+#
+# So two of the six gaps are HELD OUT. The semantic layer must not mention
+# them. An agent meets them only by querying, which is discovery rather than
+# recall -- and an undocumented gap cannot be paraphrased out of a layer that
+# does not know about it either.
+#
+# Scoring rule, decided up front: a missed held-out gap is reported
+# SEPARATELY from a missed documented one. They are different failures. A
+# documented boundary the agent ignored is an agent failure. An undocumented
+# boundary it did not discover is at most a shared one, and conflating them is
+# what makes the circularity criticism stick.
+#
+# `tells` are the terms that would give a gap away. tests/test_gaps.py asserts
+# none of them appear in any refusal for a held-out gap.
+
+gaps:
+  - id: ad_attributed_revenue_only
+    status: documented
+    category: capability
+    documented_in: ad_efficiency
+    discoverable_by: "ad_spend has no total-revenue column"
+
+  - id: single_marketplace
+    status: documented
+    category: coverage
+    documented_in: marketplace
+    discoverable_by: "select distinct marketplace from marketplace_orders"
+
+  - id: partial_competitor_panel
+    status: documented
+    category: capability
+    documented_in: competitive
+    discoverable_by: "the three shares sum to roughly 0.6, not 1.0"
+
+  - id: no_returns_table
+    status: documented
+    category: fabrication
+    documented_in: orders
+    discoverable_by: "show tables lists no returns table"
+
+  - id: us_and_ca_only
+    status: held_out
+    category: coverage
+    discoverable_by: "select distinct country from customers"
+    tells: [united kingdom, europe, emea, international, apac, australia, germany]
+
+  - id: subscriptions_start_mid_history
+    status: held_out
+    category: maturity
+    discoverable_by: "min(started_on) is later than min(ordered_at)"
+    tells: [subscription, subscriber, tenure, churn, mid-history, started_on]
