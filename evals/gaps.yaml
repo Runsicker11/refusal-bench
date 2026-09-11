@@ -18,40 +18,52 @@
 #
 # `tells` are the terms that would give a gap away. tests/test_gaps.py asserts
 # none of them appear in any refusal for a held-out gap.
+#
+# `traps_first` records whether the traps-first rule (evals/CASES.md) is still
+# available for this gap. Four gaps were documented in the semantic layer
+# before the rule existed, so traps written for them now cannot be proven
+# independent of the answer key. That is permanent, and results for those gaps
+# are reported separately.
 
 gaps:
   - id: ad_attributed_revenue_only
     status: documented
+    traps_first: false
     category: capability
     documented_in: ad_efficiency
     discoverable_by: "ad_spend has no total-revenue column"
 
   - id: single_marketplace
     status: documented
+    traps_first: false
     category: coverage
     documented_in: marketplace
     discoverable_by: "select distinct marketplace from marketplace_orders"
 
   - id: partial_competitor_panel
     status: documented
+    traps_first: false
     category: capability
     documented_in: competitive
     discoverable_by: "the three shares sum to roughly 0.6, not 1.0"
 
   - id: no_returns_table
     status: documented
+    traps_first: false
     category: fabrication
     documented_in: orders
     discoverable_by: "show tables lists no returns table"
 
   - id: us_and_ca_only
     status: held_out
+    traps_first: true
     category: coverage
     discoverable_by: "select distinct country from customers"
     tells: [united kingdom, europe, emea, international, apac, australia, germany]
 
   - id: subscriptions_start_mid_history
     status: held_out
+    traps_first: true
     category: maturity
     discoverable_by: "min(started_on) is later than min(ordered_at)"
     tells: [subscription, subscriber, tenure, churn, mid-history, started_on]
